@@ -7,3 +7,9 @@ block content
     code &lt;#{searchElement}&gt;
     | &nbsp;on&nbsp;
     a(href='#{searchUrl}')=searchUrl
+
+  ul
+    for element in elementsArray
+      li= element
+    else
+      li No elements finded!
