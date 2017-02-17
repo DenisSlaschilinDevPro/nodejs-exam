@@ -1,78 +1,65 @@
 const url = require('url');
 const got = require('got');
+const Q = require('q');
 const cheerio = require('cheerio');
 const redisStorage = require('./storage');
 
-const LEVEL = 1;
+let allLinksArray = [];
 
-let depthLevelIsReached = false;
-// let allLinksArray = [];
-// let allElementsArray = [];
+function parseUrl(urlArray, targetUrl, targetElement, depthLevel = 1, currentLevel, isLast = false) {
+  return new Promise((resolve, reject) => {
+    try {
+      let promisesArray = [];
 
-function parseUrl(queryObj, currentLevel) {
-  const targetUrl = queryObj.url;
-  const targetElement = queryObj.element;
-  const depthLevel = queryObj.level || LEVEL;
+      urlArray.forEach(currentUrl => promisesArray.push(got(currentUrl)));
 
-  if (currentLevel <= depthLevel) {
-    got(targetUrl)
-        .then(response => {
-          if (response) {
-            domParser(response.body, targetUrl, targetElement, depthLevel, currentLevel);
-          }
-        })
-        .catch(error => {
-          console.log(error);
+      if (currentLevel <= depthLevel) {
+        Q.allSettled(promisesArray)
+            .then(results => {
+              results.forEach((result, idx, results) => {
+                if (result.state === "fulfilled") {
+                  const isLast = idx === results.length - 1;
+                  domParser(result.value.body, targetUrl, targetElement, depthLevel, currentLevel, isLast);
+                } else {
+                  console.log(result.reason);
+                }
+              });
+            });
+      } else if (isLast) {
+        const elementsSetName = getElementsSetName(targetUrl, targetElement, depthLevel);
+        redisStorage.readSet(elementsSetName).then(res => {
+          resolve(res);
         });
-  }
+      }
+    } catch(err) {
+      reject(err);
+    }
+  })
 }
 
-function domParser(body, targetUrl, targetElement, depthLevel, currentLevel) {
+function domParser(body, targetUrl, targetElement, depthLevel, currentLevel, isLast) {
   let $ = cheerio.load(body);
 
   const allLinks = $('a');
   const allTargetElements = $(targetElement);
+  const elementsSetName = getElementsSetName(targetUrl, targetElement, depthLevel);
 
-  allLinksArray = allLinksArray.concat(createLinksArray(allLinks, targetUrl));
-  allElementsArray = allElementsArray.concat(createElementsArray(allTargetElements));
+  const externalLinksArray = getExternalLinksArray(allLinks, targetUrl);
+  allLinksArray = allLinksArray.concat(externalLinksArray);
+  addElementsToRedis(allTargetElements, elementsSetName);
 
-  if (currentLevel < depthLevel) {
-    allLinksArray.forEach(currentLink => {
-      parseUrl({
-        url: currentLink,
-        element: targetElement,
-        level: depthLevel
-      }, currentLevel + 1)
-    });
-  } else if (!depthLevelIsReached) {
-    depthLevelIsReached = true;
-    // console.log(allLinksArray);
-    // console.log(allElementsArray);
-    // console.log(allLinksArray.length);
-    // console.log(allElementsArray.length);
-  }
+  parseUrl(externalLinksArray, targetUrl, targetElement, depthLevel, currentLevel + 1, isLast);
 }
 
-function addLinksToRedis(allLinks, targetUrl) {
-  const linksNumber = allLinks.length;
-
-  for (let i = 0; i < linksNumber; i++ ) {
-    const currentLinkHref = allLinks[i].attribs.href;
-
-    if (currentLinkHref && isExternalLink(targetUrl, currentLinkHref)) {
-      redisStorage.addToSet('links', currentLinkHref);
-    }
-  }
-}
-
-function createLinksArray(allLinks, targetUrl) {
+function getExternalLinksArray(allLinks, targetUrl) {
   const linksNumber = allLinks.length;
   let filteredLinksArray = [];
 
   for (let i = 0; i < linksNumber; i++ ) {
     const currentLinkHref = allLinks[i].attribs.href;
 
-    if (currentLinkHref && isExternalLink(targetUrl, currentLinkHref) && !allLinksArray.includes(currentLinkHref)) {
+    if (currentLinkHref && isExternalLink(targetUrl, currentLinkHref) &&
+        !allLinksArray.includes(currentLinkHref) && !filteredLinksArray.includes(currentLinkHref)) {
       filteredLinksArray.push(currentLinkHref);
     }
   }
@@ -87,21 +74,21 @@ function isExternalLink(searchUrl, link) {
          parsedLink.host !== parsedUrl.host;
 }
 
-function createElementsArray(allTargetElements) {
+function addElementsToRedis(allTargetElements, elementsSetName) {
   const targetElementsNumber = allTargetElements.length;
-  let elementsArray = [];
 
   for (let i = 0; i < targetElementsNumber; i++ ) {
     const currentElement = cheerio.load(allTargetElements[i]);
-    elementsArray.push(currentElement.html());
+    redisStorage.addToSet(elementsSetName, currentElement.html());
+    redisStorage.expireSet(elementsSetName);
   }
-  return elementsArray;
 }
 
-redisStorage.addToSet('links', 'one');
-redisStorage.addToSet('links', 'two');
-redisStorage.readSet('links').then(res => console.log(res.length));
+function getElementsSetName(targetUrl, targetElement, depthLevel) {
+  return `${targetUrl}-${targetElement}-${depthLevel}`;
+}
 
 module.exports = {
-  parseUrl
+  parseUrl,
+  getElementsSetName
 };
