@@ -1,7 +1,6 @@
 {
   "name": "nodejs-exam",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.0.1",
   "scripts": {
     "start": "node ./bin/www"
   },
@@ -13,6 +12,7 @@
     "express": "~4.14.1",
     "redis": "^2.6.5",
     "bluebird": "^3.4.7",
+    "q": "^1.4.1",
     "config": "^1.24.0",
     "got": "^6.7.1",
     "jade": "~1.11.0",
