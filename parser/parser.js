@@ -6,8 +6,8 @@ const redisStorage = require('./storage');
 
 let allLinksArray = [];
 
-// It didnt return any result back to the user before this changes
-// Please learn more about chaining promises and passing results between them
+// It didnt return any result back to the user before this small refactoring
+// Please learn more about chaining promises, passing results between them, error-handling
 // Also this code is hard to read, so it should be splitted to smaller parts and covered by logs
 
 function parseUrl(urlArray, targetUrl, targetElement, depthLevel = 1, currentLevel, isLast = false) {
@@ -28,12 +28,11 @@ function parseUrl(urlArray, targetUrl, targetElement, depthLevel = 1, currentLev
                 }
               })
             ))
-          .then(resolve);
+          .then(resolve).catch(reject);
     } else if (isLast) {
       const elementsSetName = getElementsSetName(targetUrl, targetElement, depthLevel);
-      redisStorage.readSet(elementsSetName).then(res => {
-        resolve(res);
-      });
+      redisStorage.readSet(elementsSetName)
+        .then(resolve).catch(reject);
     }
   })
 }
