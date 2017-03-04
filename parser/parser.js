@@ -6,33 +6,34 @@ const redisStorage = require('./storage');
 
 let allLinksArray = [];
 
+// It didnt return any result back to the user before this changes
+// Please learn more about chaining promises and passing results between them
+// Also this code is hard to read, so it should be splitted to smaller parts and covered by logs
+
 function parseUrl(urlArray, targetUrl, targetElement, depthLevel = 1, currentLevel, isLast = false) {
   return new Promise((resolve, reject) => {
-    try {
-      let promisesArray = [];
+    //you dont need the whole-function try-catch here because promise will handle that for you
+    let promisesArray = [];
 
-      urlArray.forEach(currentUrl => promisesArray.push(got(currentUrl)));
-
-      if (currentLevel <= depthLevel) {
-        Q.allSettled(promisesArray)
-            .then(results => {
-              results.forEach((result, idx, results) => {
+    urlArray.forEach(currentUrl => promisesArray.push(got(currentUrl)));
+    if (currentLevel <= depthLevel) {
+      Q.allSettled(promisesArray)
+          .then(results => Promise.all(
+              results.map((result, idx) => {
                 if (result.state === "fulfilled") {
                   const isLast = idx === results.length - 1;
-                  domParser(result.value.body, targetUrl, targetElement, depthLevel, currentLevel, isLast);
+                  return domParser(result.value.body, targetUrl, targetElement, depthLevel, currentLevel, isLast);
                 } else {
                   console.log(result.reason);
                 }
-              });
-            });
-      } else if (isLast) {
-        const elementsSetName = getElementsSetName(targetUrl, targetElement, depthLevel);
-        redisStorage.readSet(elementsSetName).then(res => {
-          resolve(res);
-        });
-      }
-    } catch(err) {
-      reject(err);
+              })
+            ))
+          .then(resolve);
+    } else if (isLast) {
+      const elementsSetName = getElementsSetName(targetUrl, targetElement, depthLevel);
+      redisStorage.readSet(elementsSetName).then(res => {
+        resolve(res);
+      });
     }
   })
 }
@@ -46,9 +47,10 @@ function domParser(body, targetUrl, targetElement, depthLevel, currentLevel, isL
 
   const externalLinksArray = getExternalLinksArray(allLinks, targetUrl);
   allLinksArray = allLinksArray.concat(externalLinksArray);
-  addElementsToRedis(allTargetElements, elementsSetName);
-
-  parseUrl(externalLinksArray, targetUrl, targetElement, depthLevel, currentLevel + 1, isLast);
+  return addElementsToRedis(allTargetElements, elementsSetName)
+    .then(() => {
+      return parseUrl(externalLinksArray, targetUrl, targetElement, depthLevel, currentLevel + 1, isLast);
+    });
 }
 
 function getExternalLinksArray(allLinks, targetUrl) {
@@ -70,18 +72,21 @@ function isExternalLink(searchUrl, link) {
   const parsedUrl = url.parse(searchUrl);
   const parsedLink = url.parse(link);
   return parsedLink.protocol &&
-         parsedLink.protocol.includes('http') && 
+         parsedLink.protocol.includes('http') &&
          parsedLink.host !== parsedUrl.host;
 }
 
 function addElementsToRedis(allTargetElements, elementsSetName) {
+  const promises = [];
   const targetElementsNumber = allTargetElements.length;
-
   for (let i = 0; i < targetElementsNumber; i++ ) {
     const currentElement = cheerio.load(allTargetElements[i]);
-    redisStorage.addToSet(elementsSetName, currentElement.html());
-    redisStorage.expireSet(elementsSetName);
+    promises.push(
+      redisStorage.addToSet(elementsSetName, currentElement.html())
+        .then(() => redisStorage.expireSet(elementsSetName))
+    );
   }
+  return Promise.all(promises);
 }
 
 function getElementsSetName(targetUrl, targetElement, depthLevel) {
