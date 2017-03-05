@@ -5,6 +5,10 @@ const logger = require('morgan');
 const cookieParser = require('cookie-parser');
 const bodyParser = require('body-parser');
 
+// Too much unused copy-pasted boilerplate code and files all over the application, like 'index' and 'users' etc.
+// It's a good practice to remove all unused code to keep repo clean.
+// http://stackoverflow.com/questions/15699995/why-unused-code-should-be-deleted
+
 const index = require('./routes/index');
 const users = require('./routes/users');
 const api = require('./routes/api');
